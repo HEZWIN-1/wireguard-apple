@@ -3,47 +3,47 @@ name: WireGuard iOS Build
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # Manuel tetikleme için
 
 jobs:
   build:
     runs-on: macos-latest
+    
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      # 1. Go Ortamını Kur (WireGuard-Go derlemesi için gerekli)
+      # 1. Go Ortamını Kur (Hata veren cache kısmını düzelttik)
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.21'
+          cache: false # go.sum hatasını engellemek için false veya yol belirtilmeli
 
-      # 2. Apple Sertifikalarını Yükle
-      - name: Install Apple Certificate
-        env:
-          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+      # 2. Gereklilikleri Yükle
+      - name: Install Dependencies
         run: |
-          # Sertifikayı decode et ve keychain'e ekle (Standart prosedür)
-          echo $BUILD_CERTIFICATE_BASE64 | base64 --decode > certificate.p12
-          security create-keychain -p "" build.keychain
-          security import certificate.p12 -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -d user -s build.keychain
+          brew install swiftlint # Projede varsa hata vermemesi için
 
-      # 3. WireGuard'ın özel scriptlerini çalıştır
+      # 3. Go Bridge'i Derle (WireGuard'ın en kritik adımı)
       - name: Build WireGuard Go Bridge
         run: |
-          # WireGuard-apple projesinde Go köprüsünü derleyen scripti tetikler
-          export PATH=$PATH:$(go env GOPATH)/bin
+          # Go modüllerini çek ve statik kütüphaneyi oluştur
           cd Sources/WireGuardKitGo
+          go mod download
           make
 
-      # 4. Xcode ile Build Et
-      - name: Build for iOS
+      # 4. Xcode Build (Sertifika hatası almamak için derleme testi modunda)
+      - name: Xcode Build (Check only)
         run: |
           xcodebuild -project WireGuard.xcodeproj \
             -scheme "WireGuard-iOS" \
-            -configuration Release \
             -sdk iphoneos \
+            -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            CODE_SIGNING_REQUIRED=NO \
+            clean build
+            
